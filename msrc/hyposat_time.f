@@ -693,55 +693,18 @@ c       phase='S       '
       else if(phase(1:3).eq.'Lg ') then
 c       phase='S       '
         ip=33
-      else if(phase(1:4).eq.'pPg ') then
-c       phase='pP      '
-        ip=8
-      else if(phase(1:4).eq.'sPg ') then
-c       phase='sP      '
-        ip=13
-      else if(phase(1:4).eq.'pSg ') then
-c       phase='pS      '
-        ip=37
-      else if(phase(1:4).eq.'sSg ') then
-c       phase='sS      '
-        ip=40
-c
       elseif(phase(1:3).eq.'Pb ') then
 c       phase='P       '
         ip=2
       else if(phase(1:3).eq.'Sb ') then
 c       phase='S       '
         ip=33
-      else if(phase(1:4).eq.'pPb ') then
-c       phase='pP      '
-        ip=8
-      else if(phase(1:4).eq.'sPb ') then
-c       phase='sP      '
-        ip=13
-      else if(phase(1:4).eq.'pSb ') then
-c       phase='pS      '
-        ip=37
-      else if(phase(1:4).eq.'sSb ') then
-c       phase='sS      '
-c
       elseif(phase(1:3).eq.'Pn ') then
 c       phase='P       '
         ip=2
       else if(phase(1:3).eq.'Sn ') then
 c       phase='S       '
         ip=33
-      else if(phase(1:4).eq.'pPn ') then
-c       phase='pP      '
-        ip=8
-      else if(phase(1:4).eq.'sPn ') then
-c       phase='sP      '
-        ip=13
-      else if(phase(1:4).eq.'pSn ') then
-c       phase='pS      '
-        ip=37
-      else if(phase(1:4).eq.'sSn ') then
-c       phase='sS      '
-        ip=40
       else if(phase(1:4).eq.'SPn ') then
 c       phase='SP      '
         ip=55
@@ -802,6 +765,42 @@ c       phase='SP      '
 c
 c     approximations for depth pahses
 c
+      else if(phase(1:4).eq.'pPg ') then
+c       phase='pP      '
+        ip=8
+      else if(phase(1:4).eq.'sPg ') then
+c       phase='sP      '
+        ip=13
+      else if(phase(1:4).eq.'pSg ') then
+c       phase='pS      '
+        ip=37
+      else if(phase(1:4).eq.'sSg ') then
+c       phase='sS      '
+        ip=40
+      else if(phase(1:4).eq.'pPb ') then
+c       phase='pP      '
+        ip=8
+      else if(phase(1:4).eq.'sPb ') then
+c       phase='sP      '
+        ip=13
+      else if(phase(1:4).eq.'pSb ') then
+c       phase='pS      '
+        ip=37
+      else if(phase(1:4).eq.'sSb ') then
+c       phase='sS      '
+c
+      else if(phase(1:4).eq.'pPn ') then
+c       phase='pP      '
+        ip=8
+      else if(phase(1:4).eq.'sPn ') then
+c       phase='sP      '
+        ip=13
+      else if(phase(1:4).eq.'pSn ') then
+c       phase='pS      '
+        ip=37
+      else if(phase(1:4).eq.'sSn ') then
+c       phase='sS      '
+        ip=40
       else if(phase(1:6).eq.'pPgPg ') then
 c       phase='PP      '
         ip=30
@@ -829,15 +828,12 @@ c       phase='SS      '
       else if(phase(1:5).eq.'pPcP ') then
 c       phase='PcP     '
         ip=18
-      else if(phase(1:5).eq.'pPcP ') then
+      else if(phase(1:5).eq.'sPcP ') then
 c       phase='PcP     '
         ip=18
-      else if(phase(1:5).eq.'pPcP ') then
-c       phase='PcP     '
-        ip=18
-      else if(phase(1:5).eq.'pPcP ') then
-c       phase='PcP     '
-        ip=18
+      else if(phase(1:5).eq.'pScS ') then
+c       phase='ScS     '
+        ip=43
       else if(phase(1:5).eq.'sScS ') then
 c       phase='ScS     '
         ip=43
