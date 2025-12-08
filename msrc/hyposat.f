@@ -11,18 +11,18 @@ c
 c----------------------------------------------------------------------
 c
 c
-      program HYPOSAT_6_2a2
+      program HYPOSAT_6_2b
 
       implicit real*8 (a-h,o-z)
       implicit integer (i-n)
 
       character  version*25, VDATE*20, cprog*50
-      parameter (version='HYPOSAT Version 6.2a2    ' )
-c     parameter (vdate=' ( 23 October 2025)' )
+      parameter (version='HYPOSAT Version 6.2b     ' )
+c     parameter (vdate=' ( 08 December 2025)' )
       parameter (vdate=' ' )
 
 c
-c     last changes: 23 October 2025
+c     last changes: 08 December 2025
 c
 c----------------------------------------------------------------------
 c
@@ -2616,6 +2616,7 @@ c         print *,stat,rdum0,hh,mi,isec,msec,phisf,razi,rpa,touse0
      +       chgcas(1:1).ne.'S' .and. 
      +       chgcas(1:1).ne.'L' .and. 
      +       chgcas(1:1).ne.'R' .and. 
+     +       chgcas(1:1).ne.'A' .and. 
      +       chgcas(1:1).ne.'X' .and. 
      +       chgcas(1:2).ne.'IS' .and. 
      +       chgcas(1:1).ne.'T'   ) then
@@ -2781,6 +2782,19 @@ c     print*, timeo,jdate,yy,mon,mm,dd,idoy,hh,mi,sec
 
 62    phidd = phase(ii)
 
+      chgcas = uppcas(phidd(1:1))
+      if (chgcas.eq.'A') then
+         chgcas = uppcas(phidd(2:2))
+         if(chgcas.eq.'M')  then
+            touse(ii) = '     M   '
+            chgcas = uppcas(phidd(3:3))
+            if(chgcas.eq.'L') phase(ii) = 'AML'
+            if(chgcas.eq.'S') phase(ii) = 'AMs'
+            if(chgcas.eq.'B') phase(ii)(1:2) = 'Amb'
+            go to 63
+         endif
+      endif
+
       incap = index(lowcas(phidd),'diff') 
       if(incap.ne.0) then 
          phase(ii)(incap:) = 'dif' // phidd(incap+4:)
@@ -2797,7 +2811,7 @@ c     print*, timeo,jdate,yy,mon,mm,dd,idoy,hh,mi,sec
          go to 62
       endif
       incap =  index(phidd,'A')
-      if(incap.ne.0) then
+      if(incap.gt.1) then
          phase(ii)(incap:incap) = 'a'
          go to 62
       endif
@@ -2848,7 +2862,7 @@ c     print*, timeo,jdate,yy,mon,mm,dd,idoy,hh,mi,sec
          endif
       endif
 
-      chgcas = uppcas(stat)
+63    chgcas = uppcas(stat)
       stat = chgcas(1:5)
 
       do 10 j=1,mstat
@@ -7585,6 +7599,45 @@ c
       pares  =  -1000.d0
 
       call fetoh2(ttobs,idum,yy,mon,mm,dd,idoy,hh,mi,sec)
+    
+      if(phid(1:1).eq.'A' ) then
+
+         phid1 = phid
+
+         if(phid.eq.'Amb') then
+
+            tttn = tome + ttc(1) 
+            ttres  = ttobs - tttn
+            ttres1 = 0.d0
+
+            if(rdel.gt.113. ) then
+               if(phcd(1)(1:3).eq.'Pdi' .and. ttres.gt.50.d0) then
+                  if(phcd(2)(1:2).eq.'PK') then
+                     tttn = tome + ttc(2) 
+                  else if(phcd(3)(1:2).eq.'PK') then
+                     tttn = tome + ttc(3) 
+                  else if(phcd(4)(1:2).eq.'PK') then
+                     tttn = tome + ttc(4) 
+                  endif
+                  ttres  = ttobs - tttn
+               endif
+            endif
+            go to 433
+
+         endif
+            
+         if(phid.eq.'AML') then
+
+            do 416 iam = 1,nphas
+               if(phcd(iam)(1:1).ne.'S') go to 416
+               ttres = ttobs - tome - ttc(iam)
+               go to 433
+416         continue
+
+         endif
+
+         go to 433
+      endif
 
       if(phase(i).eq.'tx rx' .and. delta.gt.25.d0) goto 433
       if(phase(i).eq.'tx tx' .and. delta.lt.10.d0) goto 433
@@ -8433,7 +8486,7 @@ c    +         fac,emeran(i)
      +        delk(iev(i)),zo,magtyps,magtypml,magtypp,magmlfile,dmag,
      +        statmag,typctl)
 
-            if(statmag.eq. 'MS') then
+            if(statmag.eq. 'Ms') then
 
                if(delta.ge.delmsmin .and. delta.le.delmsmax) then
                   imsm = imsm + 1
@@ -8447,7 +8500,7 @@ c    +         fac,emeran(i)
 
             if(statmag.eq. 'ML') then
 
-               if(dabs(tres).lt.60.d0 ) then
+               if(tres.ge.-10.d0 .and. tres.lt.60.d0 ) then
                   if(delta.ge.delmlmin .and. delta.le.delmlmax) then
                      imlm = imlm + 1
                      if(dmag.gt.staml(iev(i))) staml(iev(i)) = dmag
@@ -9056,12 +9109,12 @@ c       write(12,'(a)') cdum
            if(imsm.gt.0) then
               if(delmsmax.le.179.9999d0 .or. delmsmin.ge.0.0001d0) then
                  write(11,'(''Magnitude: '',f4.1,'' +/- '',f4.1,'' ('',
-     +              i5,'' obs, MS, '',a,'', between'',f7.2,'' and'',
+     +              i5,'' obs, Ms, '',a,'', between'',f7.2,'' and'',
      +              f7.2,'' deg)'')')
      +               dmsm,sdms,imsm,trim(magtyps),delmsmin,delmsmax
               else
                  write(11,'(''Magnitude: '',f4.1,'' +/- '',f4.1,'' ('',
-     +              i5,'' obs, MS, '',a,'')'')') dmsm,sdms,imsm,
+     +              i5,'' obs, Ms, '',a,'')'')') dmsm,sdms,imsm,
      +              trim(magtyps)
               endif
               nli = 1
