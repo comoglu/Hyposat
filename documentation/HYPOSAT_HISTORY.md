@@ -504,3 +504,7 @@ e-mail: johannes.schweitzer@norsar.no
 ### Version 6.2a2 October 2025
 
         Some bug fixes in magnitude calculations and JSON output.
+
+### Version 6.2b December 2025 
+
+	Amplitude phase names Amb, AMs & AML implemented.

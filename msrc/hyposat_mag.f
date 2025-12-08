@@ -1308,8 +1308,9 @@ c     delk   - epicentral distance im km (real number)
 c     zo     - hypocentral depth
 c
 c     mtyps  - surface wave attenuation model
-c     mtypml - regional magnitude attenuation model
+c     mtypml - regional magnitude attenuation model name
 c     mtypp  - body wave attenuation model
+c     mlfile - file with regional magnitude attenuation
 
 c     
 c     dmag  - staion magnitue
@@ -1326,6 +1327,9 @@ c
 c     Ms = log (A / T ) + 1/3 log (DEL) + 1/2 log (sin(DEL) +
 c          0.0046 DEL + 2.370  (A in nanometer)
 c
+c     update: 5 December 2025: IASPEI amplitude measurement nomenclature
+c             added.
+c
 
       deg2rad = datan(1.d0) / 45.d0
 
@@ -1336,11 +1340,12 @@ c
       rdelk = sngl(delk)
       rzo  = sngl(zo)
 
-      if((phid.eq.'LR' .or. phid.eq.'M').and. per.ge.5.d0 ) then
+      if((phid.eq.'LR' .or. phid.eq.'M' .or. phid.eq.'AMs') 
+     +    .and. per.ge.5.d0 ) then
 
          d1 = del
 c
-c     to avoid problems with log(0.):
+c     to avoid numerical problems with log(0.):
 c
          if(d1.le.0.d0)   d1 =   0.001d0
          if(d1.ge.180.d0) d1 = 179.999d0
@@ -1359,14 +1364,14 @@ c
          endif
 
          if(dmag.lt.9.5d0 .and. dmag.gt.-9.9d0) then
-            smag ='MS'
+            smag ='Ms'
          else
             dmag = -9.999d0
          endif
 
          go to 900
 
-      else if(phid.eq.'Lg'   .or.
+      else if(phid.eq.'Lg'.or. phid.eq.'AML' .or.
      +   (phid(1:1).eq.'S'.and.(phid(2:2).eq.'g'.or.
      +     phid(2:2).eq.'b' .or.phid(2:2).eq.'n'.or.
      +     phid(2:2).eq.' '))           .or.
@@ -1424,7 +1429,8 @@ c
          endif
 
       else if((phid(1:1).eq.'P' .or. phid(1:2).eq.'pP' .or.
-     +         phid(1:2).eq.'sP') .and. per.gt.0.d0 ) then
+     +         phid(1:2).eq.'sP' .or. phid.eq.'Amb' )
+     +         .and. per.gt.0.d0 ) then
 
          magfile = ' '
 
