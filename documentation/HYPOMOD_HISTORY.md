@@ -58,8 +58,12 @@
 
 ### Version 2.2 June 2025
 
-	Compatible with HYPOSAT_6.2.
+	Compatible with HYPOSAT_6.2 and published on GitHub
 
 ### Version 2.2a August 2025
 
 	Compatible with HYPOSAT_6.2a.
+
+### Version 2.2b December 2025 
+
+        Amplitude phase names Amb, AMs & AML implemented.
