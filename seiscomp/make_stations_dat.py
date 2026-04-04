@@ -116,7 +116,7 @@ def parse_inventory(xml_file):
                 'code':  code,
                 'lat':   lat,
                 'lon':   lon,
-                'elev':  elev / 1000.0,   # convert m → km for Hyposat
+                'elev':  elev,   # metres (NEIC format uses metres)
                 'desc':  desc,
             }
 
@@ -125,13 +125,14 @@ def parse_inventory(xml_file):
 
 def write_stations_dat(stations, out_file=None):
     """
-    Write stations in Hyposat stations.dat format.
+    Write stations in Hyposat stations.dat NEIC format.
 
-    Format (from the NORSAR file):
-        SSSSS DDMMSS.sN DDDMMSS.sE  ELEVkm Description
+    Fortran FORMAT (hyposat_geotab.f line 2154):
+        format(A5, a1, i2,i2,f4.1,a1, i3,i2,f4.1,a1, f7.1, a48)
+        SSSSS<sep>DDMMSS.sN/SDDDMMSS.sE/W<elev_m><desc>
 
-    Example:
-        WRA   243512.0S 1344129.0E   0.380Warramunga, Australia
+    Example from NORSAR stations.dat:
+        WRA   195633.4S1342021.8E  419.0Warramunga Array Beam Reference Point
     """
     out = open(out_file, 'w') if out_file else sys.stdout
 
@@ -139,10 +140,10 @@ def write_stations_dat(stations, out_file=None):
         code  = f"{sta['code']:<5s}"
         lat_s = format_lat(sta['lat'])
         lon_s = format_lon(sta['lon'])
-        elev  = sta['elev']
+        elev  = sta['elev']   # metres
         desc  = sta['desc']
-        # Elevation: 6 chars with 3 decimal places (e.g. "  0.380")
-        line = f"{code} {lat_s} {lon_s} {elev:6.3f}{desc}\n"
+        # No space between lat_s and lon_s — position 25 must be E/W for format detection
+        line = f"{code} {lat_s}{lon_s}{elev:7.1f}{desc}\n"
         out.write(line)
 
     if out_file:

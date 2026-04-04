@@ -447,26 +447,16 @@ def build_output_xml(origin_el, picks_dict, loc, ns_uri):
     ET.register_namespace('', ns_uri)       # suppress 'ns0:' prefix
 
     root = ET.Element(q(ns_uri, 'seiscomp'))
-    ep = ET.SubElement(root, q(ns_uri, 'EventParameters'))
 
-    # Copy only the picks referenced by non-zero-weight arrivals
-    used_pick_ids = set()
-    for arr_el in origin_el.findall(q(ns_uri, 'arrival')):
-        w = get_float(arr_el, ns_uri, 'weight')
-        if w is not None and w == 0.0:
-            continue
-        pid = get_text(arr_el, ns_uri, 'pickID')
-        if pid:
-            used_pick_ids.add(pid)
-
-    for pid in used_pick_ids:
-        pick_el = picks_dict.get(pid)
-        if pick_el is not None:
-            _copy_element(pick_el, ns_uri, ep)
+    # Origin must be a DIRECT child of <seiscomp>.
+    # The XMLArchive's findTag() only searches direct children of _current
+    # (set to the <seiscomp> node), so wrapping in <EventParameters> hides it.
 
     # New origin (new publicID so SeisComP treats it as an update)
+    # Tag must be 'Origin' (capital O) — XMLArchive.isValidTag() compares
+    # against T::ClassName() = "Origin" using case-sensitive xmlStrcmp.
     new_id  = f'Hyposat/{uuid.uuid4()}'
-    orig_el = ET.SubElement(ep, q(ns_uri, 'origin'))
+    orig_el = ET.SubElement(root, q(ns_uri, 'Origin'))
     orig_el.set('publicID', new_id)
 
     # --- Time ---
@@ -598,6 +588,8 @@ def main():
         env = os.environ.copy()
         env['HYPOSAT_DATA'] = HYPOSAT_DATA_DIR
 
+        n_arrivals = hyposat_in_text.count('\n') - 1  # minus title line
+        print(f'INFO: sending {n_arrivals} arrivals to hyposat', file=sys.stderr)
         print(f'INFO: running {HYPOSAT_BIN} in {tmpdir}', file=sys.stderr)
         result = subprocess.run(
             [HYPOSAT_BIN],
@@ -609,6 +601,10 @@ def main():
             timeout=60
         )
 
+        # Forward Hyposat's stdout (contains warnings, station-not-found, etc.)
+        for line in result.stdout.splitlines():
+            print(f'HYPOSAT: {line}', file=sys.stderr)
+
         if result.returncode != 0:
             print(f'ERROR: hyposat exited with code {result.returncode}',
                   file=sys.stderr)
@@ -617,7 +613,6 @@ def main():
 
         if not os.path.exists(out_file):
             print('ERROR: hyposat-out was not created', file=sys.stderr)
-            print(result.stdout, file=sys.stderr)
             sys.exit(1)
 
         with open(out_file, 'r') as f:
