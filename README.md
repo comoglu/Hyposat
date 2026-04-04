@@ -4,6 +4,16 @@ HYPOSAT/ HYPOMOD are file-in file-out utilities for localization of seismic even
 It has previously been shared to those interested via mail or ftp.
 From version 6.2, it is available in GitHub
 
+## SeisComP Integration
+
+HYPOSAT can be used as a locator directly within [SeisComP](https://www.seiscomp.de/)
+via the ExternalLocator plugin. Once configured, it appears as a selectable
+locator in `scolv` alongside LOCSAT, NonLinLoc, and others.
+
+See **[seiscomp/README.md](seiscomp/README.md)** for full setup instructions,
+including how to configure the ExternalLocator plugin, generate a `stations.dat`
+from your SeisComP inventory, and troubleshoot common issues.
+
 The program package consists mainly of Fortran code, and is put together by Johannes Schweitzer at NORSAR since 1997 and before at the Ruhr-Univerity Bochum, Germany. 
 
 Details of the ideas behind HYPOSAT / HYPOMOD and how it developed can be found in the following publications:

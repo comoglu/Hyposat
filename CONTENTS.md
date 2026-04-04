@@ -239,3 +239,23 @@ All source codes to compile your own executives of HYPOSAT and HYPOMOD on Linux 
 
 	CMakeLists.txt: CMake setup for builds on Windows and Linux
 
+### Subdirectory ./seiscomp/
+
+Scripts to integrate HYPOSAT with SeisComP as an ExternalLocator plugin.
+See seiscomp/README.md for full setup and configuration instructions.
+
+	README.md
+		Full documentation for the SeisComP integration
+
+	hyposat_wrapper.py
+		SeisComP ExternalLocator wrapper script. Reads a SeisComP XML event
+		(origin + picks) from stdin, runs hyposat, and returns an updated
+		origin as SeisComP XML on stdout. Configure in global.cfg:
+		  plugins = locext
+		  ExternalLocator.profiles = Hyposat:/path/to/seiscomp/hyposat_wrapper.py
+
+	make_stations_dat.py
+		Converts a SeisComP inventory XML file (from scxmldump -fI) into
+		HYPOSAT stations.dat NEIC format. Use to add your local network
+		stations to data/stations.dat.
+
