@@ -1,0 +1,12 @@
+# SeisComP event/inventory exports (potentially sensitive, regeneratable)
+*.xml
+
+# Hyposat runtime files
+hyposat-in
+hyposat-out
+hyposat-parameter
+hyposat-isf.*
+
+# Python cache
+__pycache__/
+*.pyc
