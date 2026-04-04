@@ -65,6 +65,8 @@ To build HYPOSAT / HYPOMOD, you need:
 
 The Program has been tested on Windows 10 and Windows 11 with Visual Studio 2022 and Intel OneAPI, and on Linux RHEL 7 and RHEL 9 with gcc and gfortran compilers.
 
+The pre-compiled binary in `bin/hyposat` (built on Rocky 9) has also been confirmed to run on **Ubuntu 24.04 LTS** without recompilation.
+
 The Windows build expects Microsoft C/C++ compilers and Intel OneAPI Fortran compilers.
  
 ## Build instructions:

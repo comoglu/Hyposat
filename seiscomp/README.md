@@ -29,7 +29,8 @@ scolv → locext plugin → hyposat_wrapper.py → hyposat binary → scolv
 - SeisComP ≥ 5 with the `locext` plugin available  
   (`/opt/seiscomp/lib/plugins/locext.so` or similar)
 - Python 3.6+  (standard library only — no extra packages needed)
-- The compiled `hyposat` binary (see the build instructions in `../README.md`)
+- The compiled `hyposat` binary (see the build instructions in `../README.md`);
+  the pre-compiled binary in `../bin/hyposat` works on Rocky 9 and Ubuntu 24.04 LTS
 
 ## Installation
 
