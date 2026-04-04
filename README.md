@@ -103,3 +103,48 @@ cmake --build . --target install
 
 cmake --build . --target package
 
+## Velocity models
+
+The following 1-D global velocity models are included in `data/` as
+pre-computed tau-spline tables (`*_A.hed` / `*_A.tbl` pairs):
+
+| Model | Description |
+|-------|-------------|
+| `ak135_A` | AK135 — recommended for global / teleseismic locations |
+| `ek137_A` | EK137 — extended AK135 variant |
+| `iasp91_A` | IASP91 — the original ISC standard model |
+| `iasp91a_A` | IASP91a — as IASP91, different inner core |
+| `prem_A` | PREM (Preliminary Reference Earth Model) |
+| `sp6_A` | SP6 |
+| `jb_A` | Jeffreys-Bullen — the historical standard |
+
+Regional models also included:
+
+| Model | Region |
+|-------|--------|
+| `barents16_A` | Barents Sea |
+| `barey_A` | Barents Sea / Svalbard (Y) |
+| `barez_A` | Barents Sea / Svalbard (Z) |
+| `bergen_A` | Bergen, Norway |
+| `fescan_A` | Fennoscandian Shield |
+
+Specify the model with the `GLOBAL MODEL` parameter in `hyposat-parameter`,
+or via the `HYPOSAT_MODEL` environment variable when using the SeisComP wrapper.
+CRUST 1.0 crustal corrections (`data/crust1.*`) can be enabled independently
+of the global model. A custom flat-layer local model can be supplied via the
+`LOCAL OR REGIONAL MODEL` parameter (see `examples/loc.dat` for the format).
+
+## Quick start (standalone)
+
+```bash
+# Set the data directory
+export HYPOSAT_DATA=/path/to/Hyposat/data
+
+# Run the teleseismic example
+cd examples
+../bin/hyposat   # reads hyposat-in and hyposat-parameter from the current directory
+```
+
+See `examples/README` and the manual in `documentation/` for details on input
+file formats and parameter settings.
+

@@ -164,12 +164,62 @@ These can be set in the `scolv` locator profile configuration.
 
 Paths are resolved relative to the location of `hyposat_wrapper.py`.
 
-## Velocity model and CRUST 1.0
+## Velocity models
 
 The wrapper generates a `hyposat-parameter` file that enables CRUST 1.0 crustal
-corrections by default. The global model (`ak135_A`) is used unless overridden
-by the `HYPOSAT_MODEL` environment variable. Other available models in
-`../data/` include `iasp91_A`, `ek137_A`, `prem_A`, `sp6_A`, and `jb_A`.
+corrections by default. Set the model with the `HYPOSAT_MODEL` environment
+variable (default: `ak135_A`).
+
+### Global 1-D models (available in `../data/`)
+
+| Model name | Description |
+|------------|-------------|
+| `ak135_A` | AK135 — recommended default for global and teleseismic locations |
+| `ek137_A` | EK137 — extended AK135 variant |
+| `iasp91_A` | IASP91 — the original ISC standard model |
+| `iasp91a_A` | IASP91a — as IASP91 but with a different inner core |
+| `prem_A` | PREM (Preliminary Reference Earth Model) |
+| `sp6_A` | SP6 regional model |
+| `jb_A` | Jeffreys-Bullen — the historical standard |
+
+### Regional models (available in `../data/`)
+
+These are pre-computed tau-spline tables for specific regions:
+
+| Model name | Region |
+|------------|--------|
+| `barents16_A` | Barents Sea region |
+| `barey_A` | Barents Sea / Svalbard (Y-component) |
+| `barez_A` | Barents Sea / Svalbard (Z-component) |
+| `bergen_A` | Bergen (Norway) regional model |
+| `fescan_A` | Fennoscandian Shield |
+
+Regional models are used as the `GLOBAL MODEL` setting and are best suited for
+events within the region they were derived for.
+
+### Selecting a model
+
+```bash
+# Use IASP91 instead of AK135
+HYPOSAT_MODEL=iasp91_A python3 hyposat_wrapper.py < event.xml
+
+# Or set permanently in your environment / SeisComP profile config
+export HYPOSAT_MODEL=iasp91_A
+```
+
+### Local / custom velocity model
+
+HYPOSAT also supports a custom flat-layer velocity model via the
+`LOCAL OR REGIONAL MODEL` parameter in `hyposat-parameter`. This is not yet
+exposed in the wrapper but can be added by extending `format_hyposat_parameter()`
+in `hyposat_wrapper.py`. See `../examples/loc.dat` for the format.
+
+### CRUST 1.0 corrections
+
+Crustal corrections using the CRUST 1.0 global model are enabled by default
+(`CRUST CORR CODE: 1` in the generated parameter file). This improves location
+accuracy particularly for regional distances. The required data files
+(`crust1.bnds`, `crust1.vp`, `crust1.vs`) are included in `../data/`.
 
 ## Troubleshooting
 
