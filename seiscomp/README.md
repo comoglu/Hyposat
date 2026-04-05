@@ -75,7 +75,7 @@ python3 hyposat_wrapper.py < ../examples/hyposat-in.tele   # (not exactly, but f
 Or pipe a real SeisComP XML event:
 
 ```bash
-scxmldump -fPAO -E <eventID> -o event.xml
+scxmldump -fPAMp -E <eventID> -o event.xml
 python3 hyposat_wrapper.py < event.xml
 ```
 
