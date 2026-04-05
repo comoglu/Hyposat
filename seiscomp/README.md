@@ -272,9 +272,53 @@ To test interactively:
 python3 hyposat_wrapper.py < event.xml > /dev/null
 ```
 
+## Verifying DFX backazimuth measurements
+
+After enabling `fx = DFX` in scautopick, use `check_dfx_baz.py` to verify
+that the measured backazimuths are physically reasonable for a given event:
+
+```bash
+# Export the event XML
+scxmldump -fPAO -E <eventID> -o event.xml
+
+# Run the check (uses preferred origin and ../data/stations.dat by default)
+python3 check_dfx_baz.py event.xml
+
+# Override the minimum distance threshold (default 20°)
+python3 check_dfx_baz.py event.xml --min-dist 30
+
+# Use a specific origin instead of the preferred one
+python3 check_dfx_baz.py event.xml --origin-id 20260405013508.279513.88656
+```
+
+The script computes theoretical backazimuths from great-circle geometry and
+compares them against the DFX-measured values, reporting per-station residuals
+and an RMS.
+
+**Interpreting the output:**
+
+| Status | Meaning |
+|--------|---------|
+| `GOOD` | Residual within `--threshold` (default ±30°) |
+| `BAD` | Residual exceeds threshold — bad measurement or wrong origin |
+| `NEAR` | Station is closer than `--min-dist` — DFX unreliable here |
+| `NO_COORDS` | Station missing from stations.dat |
+
+DFX is designed for **teleseismic** P waves (distance ≥ 20°). At short
+distances the P wave arrives nearly vertically, so horizontal particle motion
+is minimal and the backazimuth estimate is unreliable. Always test DFX on
+teleseismic events (M5.5+, distance > 30° at most recording stations).
+
+**Note on the `rect_raw` column:** DFX stores `2 × λ₁` (twice the largest
+covariance eigenvalue) in the `DFX:rectilinearity` Pick comment. This is
+**not** the normalised Jurkevics (1988) value (0–1). Use it only as a
+relative quality ranking within the same event — higher values indicate
+stronger signal polarization.
+
 ## Files in this directory
 
 | File | Description |
 |------|-------------|
 | `hyposat_wrapper.py` | SeisComP ExternalLocator wrapper (main integration script) |
 | `make_stations_dat.py` | Convert SeisComP inventory XML to HYPOSAT `stations.dat` |
+| `check_dfx_baz.py` | Verify DFX backazimuth measurements against theoretical values |
