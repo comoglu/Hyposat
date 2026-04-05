@@ -484,10 +484,51 @@ def build_output_xml(origin_el, picks_dict, loc, ns_uri):
     ET.SubElement(orig_el, q(ns_uri, 'methodID')).text    = 'HYPOSAT'
     ET.SubElement(orig_el, q(ns_uri, 'earthModelID')).text = HYPOSAT_MODEL
 
-    # --- Quality ---
+    # --- Quality (compute stats from arrivals that will be written) ---
+    used_arrivals = [
+        arr_el for arr_el in origin_el.findall(q(ns_uri, 'arrival'))
+        if not ((get_float(arr_el, ns_uri, 'weight') or 1.0) == 0.0)
+    ]
+    all_arrivals = origin_el.findall(q(ns_uri, 'arrival'))
+
+    # Azimuthal gap from azimuth values on used arrivals
+    azimuths: list[float] = sorted(
+        v for a in used_arrivals
+        if (v := get_float(a, ns_uri, 'azimuth')) is not None
+    )
+    if len(azimuths) >= 2:
+        gaps = [azimuths[i+1] - azimuths[i] for i in range(len(azimuths)-1)]
+        gaps.append(360.0 - azimuths[-1] + azimuths[0])
+        az_gap = max(gaps)
+    else:
+        az_gap = None
+
+    # Distance stats from used arrivals
+    distances: list[float] = sorted(
+        v for a in used_arrivals
+        if (v := get_float(a, ns_uri, 'distance')) is not None
+    )
+
+    # Unique station codes used
+    used_sta = set()
+    for a in used_arrivals:
+        pid = get_text(a, ns_uri, 'pickID')
+        # station code encoded in arrival azimuth/distance — use pick lookup below
+        # (we count arrivals as a proxy; exact dedup done via pick waveformID)
+        if pid:
+            used_sta.add(pid)
+
     qual_el = ET.SubElement(orig_el, q(ns_uri, 'quality'))
-    ET.SubElement(qual_el, q(ns_uri, 'usedPhaseCount')).text = str(loc['def_count'])
-    ET.SubElement(qual_el, q(ns_uri, 'standardError')).text  = f"{loc['rms']:.4f}"
+    ET.SubElement(qual_el, q(ns_uri, 'associatedPhaseCount')).text = str(len(all_arrivals))
+    ET.SubElement(qual_el, q(ns_uri, 'usedPhaseCount')).text       = str(loc['def_count'])
+    ET.SubElement(qual_el, q(ns_uri, 'standardError')).text        = f"{loc['rms']:.4f}"
+    if az_gap is not None:
+        ET.SubElement(qual_el, q(ns_uri, 'azimuthalGap')).text     = f"{az_gap:.2f}"
+    if distances:
+        ET.SubElement(qual_el, q(ns_uri, 'minimumDistance')).text  = f"{distances[0]:.4f}"
+        ET.SubElement(qual_el, q(ns_uri, 'maximumDistance')).text  = f"{distances[-1]:.4f}"
+        mid = distances[len(distances) // 2]
+        ET.SubElement(qual_el, q(ns_uri, 'medianDistance')).text   = f"{mid:.4f}"
 
     # --- Uncertainty ellipse ---
     if loc['major_axis'] is not None:
