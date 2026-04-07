@@ -2,13 +2,19 @@
 """
 check_dfx_baz.py — Verify DFX backazimuth measurements from SeisComP.
 
-Accepts two input formats:
+Accepts three input formats:
 
-  1. SeisComP XML  (scxmldump -fPAO output)
+  1. SeisComP XML with origin  (scxmldump -fPAO output, or full bulletin XML)
      Station coordinates are read from stations.dat; the theoretical BAZ is
-     computed from the great-circle formula.
+     computed from the great-circle formula.  The preferred origin supplies
+     the epicentre.  Arrival links provide the lc_res / used columns.
 
-  2. scolv arrival CSV export  (semicolon-delimited, header starts with
+  2. SeisComP XML picks-only  (DFX 7 / CTBTO output — no <origin> element)
+     Same schema as (1) but the file contains only picks.  Provide the
+     epicentre coordinates via --lat / --lon.  The lc_res and used columns
+     are not available in this mode.
+
+  3. scolv arrival CSV export  (semicolon-delimited, header starts with
      "# Used;ID;Status;...")
      The 'Az' column already gives the forward azimuth from the epicentre to
      the station, so theoretical BAZ = Az + 180°.  No station coordinates
@@ -16,8 +22,11 @@ Accepts two input formats:
 
 Usage
 -----
-  # XML input (preferred — full detail including DFX:rectilinearity)
+  # XML input with embedded origin (preferred — full detail)
   python3 check_dfx_baz.py event.xml
+
+  # DFX 7 / picks-only XML — supply the epicentre on the command line
+  python3 check_dfx_baz.py dfx7_picks.xml --lat -4.5 --lon 125.2 --depth 610
 
   # scolv CSV export
   python3 check_dfx_baz.py arrivals.csv
@@ -64,14 +73,45 @@ import sys
 import xml.etree.ElementTree as ET
 
 # ---------------------------------------------------------------------------
-# Constants
+# Namespace helpers
 # ---------------------------------------------------------------------------
 
-SC_NS = "http://geofon.gfz.de/ns/seiscomp-schema/0.14"
+# Known SeisComP XML namespaces (schema versions 0.11–0.14)
+_KNOWN_NS = {
+    "http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.11",
+    "http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.12",
+    "http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.13",
+    "http://geofon.gfz.de/ns/seiscomp-schema/0.14",
+}
 
 
-def q(tag: str) -> str:
-    return f"{{{SC_NS}}}{tag}"
+def _detect_namespace(path: str) -> str:
+    """Return the SeisComP XML namespace declared in the root element.
+
+    Falls back to the 0.14 namespace if none of the known variants are found.
+    """
+    try:
+        tree = ET.parse(path)
+        root = tree.getroot()
+        tag = root.tag  # e.g. '{http://...}seiscomp'
+        if tag.startswith("{"):
+            ns = tag[1:tag.index("}")]
+            if ns in _KNOWN_NS:
+                return ns
+            print(f"WARNING: unrecognised namespace '{ns}' — trying anyway",
+                  file=sys.stderr)
+            return ns
+    except Exception:
+        pass
+    return "http://geofon.gfz.de/ns/seiscomp-schema/0.14"
+
+
+# Module-level default (overridden per-call via _q helper below)
+_SC_NS = "http://geofon.gfz.de/ns/seiscomp-schema/0.14"
+
+
+def q(tag: str, ns: str = None) -> str:
+    return f"{{{ns or _SC_NS}}}{tag}"
 
 
 # ---------------------------------------------------------------------------
@@ -164,17 +204,17 @@ def load_stations(path: str) -> dict:
 # SeisComP XML helpers
 # ---------------------------------------------------------------------------
 
-def get_text(el, *tags):
+def get_text(el, *tags, ns=None):
     node = el
     for tag in tags:
         if node is None:
             return None
-        node = node.find(q(tag))
+        node = node.find(q(tag, ns))
     return node.text.strip() if node is not None and node.text else None
 
 
-def get_float(el, *tags):
-    t = get_text(el, *tags)
+def get_float(el, *tags, ns=None):
+    t = get_text(el, *tags, ns=ns)
     try:
         return float(t) if t is not None else None
     except ValueError:
@@ -319,12 +359,20 @@ def process_csv(path: str, min_dist: float, threshold: float):
 # ---------------------------------------------------------------------------
 
 def process_xml(path: str, stations_path: str, origin_id: str,
-                min_dist: float, threshold: float):
+                min_dist: float, threshold: float,
+                cli_lat: float = None, cli_lon: float = None,
+                cli_depth: float = None):
 
     if not os.path.isfile(stations_path):
         sys.exit(f"ERROR: stations.dat not found: {stations_path}")
     stations = load_stations(stations_path)
     print(f"Loaded {len(stations)} stations from {stations_path}", file=sys.stderr)
+
+    ns = _detect_namespace(path)
+    print(f"XML namespace: {ns}", file=sys.stderr)
+
+    def qn(tag):
+        return q(tag, ns)
 
     try:
         tree = ET.parse(path)
@@ -332,93 +380,125 @@ def process_xml(path: str, stations_path: str, origin_id: str,
         sys.exit(f"ERROR: cannot parse XML: {exc}")
 
     root = tree.getroot()
-    ep = root.find(q("EventParameters"))
+    ep = root.find(qn("EventParameters"))
     if ep is None:
         sys.exit("ERROR: no <EventParameters> in XML")
 
     picks_by_id = {}
-    for pick in ep.iter(q("pick")):
+    for pick in ep.iter(qn("pick")):
         pid = pick.get("publicID")
         if pid:
             picks_by_id[pid] = pick
 
     origins_by_id = {}
-    for origin in ep.iter(q("origin")):
+    for origin in ep.iter(qn("origin")):
         oid = origin.get("publicID")
         if oid:
             origins_by_id[oid] = origin
 
+    # --- Resolve epicentre ---------------------------------------------------
     preferred_origin = None
-    if origin_id:
-        for oid, orig in origins_by_id.items():
-            if origin_id in oid:
-                preferred_origin = orig
-                print(f"Using origin: {oid}", file=sys.stderr)
-                break
-        if preferred_origin is None:
-            sys.exit(f"ERROR: origin '{origin_id}' not found in XML")
-    else:
-        event = ep.find(q("event"))
-        if event is not None:
-            pref_id = get_text(event, "preferredOriginID")
-            if pref_id and pref_id in origins_by_id:
-                preferred_origin = origins_by_id[pref_id]
-                print(f"Using preferred origin: {pref_id}", file=sys.stderr)
-        if preferred_origin is None:
-            if origins_by_id:
+    picks_only_mode = False
+
+    if origins_by_id:
+        if origin_id:
+            for oid, orig in origins_by_id.items():
+                if origin_id in oid:
+                    preferred_origin = orig
+                    print(f"Using origin: {oid}", file=sys.stderr)
+                    break
+            if preferred_origin is None:
+                sys.exit(f"ERROR: origin '{origin_id}' not found in XML")
+        else:
+            event = ep.find(qn("event"))
+            if event is not None:
+                pref_id = get_text(event, "preferredOriginID", ns=ns)
+                if pref_id and pref_id in origins_by_id:
+                    preferred_origin = origins_by_id[pref_id]
+                    print(f"Using preferred origin: {pref_id}", file=sys.stderr)
+            if preferred_origin is None:
                 preferred_origin = next(iter(origins_by_id.values()))
                 print("WARNING: no preferredOriginID — using first origin",
                       file=sys.stderr)
-            else:
-                sys.exit("ERROR: no origins found in XML")
 
-    epi_lat = get_float(preferred_origin, "latitude",  "value")
-    epi_lon = get_float(preferred_origin, "longitude", "value")
-    epi_dep = get_float(preferred_origin, "depth",     "value")
-    if epi_lat is None or epi_lon is None:
-        sys.exit("ERROR: could not read epicentre coordinates from origin")
+        epi_lat = get_float(preferred_origin, "latitude",  "value", ns=ns)
+        epi_lon = get_float(preferred_origin, "longitude", "value", ns=ns)
+        epi_dep = get_float(preferred_origin, "depth",     "value", ns=ns)
+        if epi_lat is None or epi_lon is None:
+            sys.exit("ERROR: could not read epicentre coordinates from origin")
 
-    method = get_text(preferred_origin, "methodID")     or "?"
-    model  = get_text(preferred_origin, "earthModelID") or "?"
-    print(f"Epicentre: lat={epi_lat:.4f}°  lon={epi_lon:.4f}°  "
-          f"depth={epi_dep:.1f} km  [{method}/{model}]", file=sys.stderr)
+        method = get_text(preferred_origin, "methodID",     ns=ns) or "?"
+        model  = get_text(preferred_origin, "earthModelID", ns=ns) or "?"
+        dep_s  = f"{epi_dep:.1f} km" if epi_dep is not None else "? km"
+        print(f"Epicentre: lat={epi_lat:.4f}°  lon={epi_lon:.4f}°  "
+              f"depth={dep_s}  [{method}/{model}]", file=sys.stderr)
 
-    # Build a map: pickID → arrival element (from the preferred origin).
-    # This lets us check backazimuthUsed and backazimuthResidual per pick.
+    else:
+        # Picks-only XML (e.g. DFX 7 / CTBTO output)
+        if cli_lat is None or cli_lon is None:
+            sys.exit(
+                "ERROR: XML contains no <origin> element.\n"
+                "       Provide the epicentre with --lat and --lon.\n"
+                "       Example: --lat -4.5 --lon 125.2 --depth 610"
+            )
+        epi_lat  = cli_lat
+        epi_lon  = cli_lon
+        epi_dep  = cli_depth
+        picks_only_mode = True
+        dep_s = f"{epi_dep:.1f} km" if epi_dep is not None else "? km"
+        print(f"Picks-only XML — epicentre from CLI: "
+              f"lat={epi_lat:.4f}°  lon={epi_lon:.4f}°  depth={dep_s}",
+              file=sys.stderr)
+
+    # Override epicentre with CLI coords if the user supplied them even when an
+    # origin exists (useful for cross-checking against an external solution).
+    if not picks_only_mode and cli_lat is not None and cli_lon is not None:
+        epi_lat = cli_lat
+        epi_lon = cli_lon
+        if cli_depth is not None:
+            epi_dep = cli_depth
+        print(f"Epicentre overridden by CLI: "
+              f"lat={epi_lat:.4f}°  lon={epi_lon:.4f}°", file=sys.stderr)
+
+    # --- Arrival links (lc_res / used) — only available when origin exists ---
     arrivals_by_pick = {}
-    for arr in preferred_origin.iter(q("arrival")):
-        pid = get_text(arr, "pickID")
-        if pid:
-            arrivals_by_pick[pid] = arr
+    if preferred_origin is not None:
+        for arr in preferred_origin.iter(qn("arrival")):
+            pid = get_text(arr, "pickID", ns=ns)
+            if pid:
+                arrivals_by_pick[pid] = arr
 
+    # --- Process picks -------------------------------------------------------
     rows = []
     for pid, pick in picks_by_id.items():
-        baz_obs = get_float(pick, "backazimuth", "value")
+        baz_obs = get_float(pick, "backazimuth", "value", ns=ns)
         if baz_obs is None:
             continue
 
-        wf = pick.find(q("waveformID"))
+        wf = pick.find(qn("waveformID"))
         if wf is None:
             continue
-        net  = wf.get("networkCode", "?")
-        sta  = wf.get("stationCode",  "?")
+        net = wf.get("networkCode", "?")
+        sta = wf.get("stationCode",  "?")
+        cha = wf.get("channelCode",  "")
+
+        author = get_text(pick, "creationInfo", "author", ns=ns) or ""
 
         rect = None
-        for comment in pick.findall(q("comment")):
-            if get_text(comment, "id") == "DFX:rectilinearity":
-                rect = get_float(comment, "text")
+        for comment in pick.findall(qn("comment")):
+            if get_text(comment, "id", ns=ns) == "DFX:rectilinearity":
+                rect = get_float(comment, "text", ns=ns)
                 break
 
-        baz_unc = get_float(pick, "backazimuth", "uncertainty")
+        baz_unc = get_float(pick, "backazimuth", "uncertainty", ns=ns)
 
-        # Check whether the locator actually used this BAZ observation
         arr_el = arrivals_by_pick.get(pid)
-        baz_used     = (get_text(arr_el, "backazimuthUsed") == "true") if arr_el is not None else None
-        locsat_bazres = get_float(arr_el, "backazimuthResidual") if arr_el is not None else None
+        baz_used      = (get_text(arr_el, "backazimuthUsed", ns=ns) == "true") if arr_el is not None else None
+        locsat_bazres = get_float(arr_el, "backazimuthResidual", ns=ns) if arr_el is not None else None
 
         if sta not in stations:
             rows.append({
-                "net": net, "sta": sta,
+                "net": net, "sta": sta, "cha": cha, "author": author,
                 "dist": None, "obs": baz_obs, "theo": None,
                 "res": None, "rect": rect, "unc": baz_unc,
                 "baz_used": baz_used, "locsat_bazres": locsat_bazres,
@@ -438,7 +518,7 @@ def process_xml(path: str, stations_path: str, origin_id: str,
             status = "BAD"
 
         rows.append({
-            "net": net, "sta": sta,
+            "net": net, "sta": sta, "cha": cha, "author": author,
             "dist": dist_deg, "obs": baz_obs, "theo": theo_baz,
             "res": residual, "rect": rect, "unc": baz_unc,
             "baz_used": baz_used, "locsat_bazres": locsat_bazres,
@@ -447,31 +527,47 @@ def process_xml(path: str, stations_path: str, origin_id: str,
 
     rows.sort(key=lambda r: (r["dist"] is None, r["dist"] or 0))
 
-    hdr = (f"{'Station':<12} {'dist°':>6}  {'obs_baz':>7}  {'±unc':>5}  "
-           f"{'theo_baz':>8}  {'resid':>6}  {'lc_res':>6}  {'used':>4}  "
-           f"{'rect_raw':>12}  status")
+    # --- Print table ---------------------------------------------------------
+    has_arrival_info = any(r.get("baz_used") is not None for r in rows)
+
+    if has_arrival_info:
+        hdr = (f"{'Station':<14} {'chan':>5}  {'dist°':>6}  {'obs_baz':>7}  "
+               f"{'±unc':>5}  {'theo_baz':>8}  {'resid':>6}  "
+               f"{'lc_res':>6}  {'used':>4}  {'rect_raw':>12}  status")
+    else:
+        hdr = (f"{'Station':<14} {'chan':>5}  {'dist°':>6}  {'obs_baz':>7}  "
+               f"{'±unc':>5}  {'theo_baz':>8}  {'resid':>6}  "
+               f"{'rect_raw':>12}  {'author':<20}  status")
     print()
     print(hdr)
     print("-" * len(hdr))
 
     for r in rows:
-        sta_label  = f"{r['net']}.{r['sta']}"
-        dist_s     = f"{r['dist']:6.1f}"  if r["dist"] is not None else "     ?"
-        obs_s      = f"{r['obs']:7.1f}"
-        unc_s      = f"{r['unc']:5.1f}"   if r["unc"]  is not None else "    ?"
-        theo_s     = f"{r['theo']:8.1f}"  if r["theo"] is not None else "       ?"
-        res_s      = f"{r['res']:+6.1f}"  if r["res"]  is not None else "     ?"
-        rect_s     = f"{r['rect']:12.1f}" if r["rect"] is not None else "           ?"
-        lcres_s    = (f"{r['locsat_bazres']:+6.1f}"
-                      if r.get("locsat_bazres") is not None else "     ?")
-        if r.get("baz_used") is True:
-            used_s = " YES"
-        elif r.get("baz_used") is False:
-            used_s = "  no"
+        sta_label = f"{r['net']}.{r['sta']}"
+        dist_s    = f"{r['dist']:6.1f}"  if r["dist"] is not None else "     ?"
+        obs_s     = f"{r['obs']:7.1f}"
+        unc_s     = f"{r['unc']:5.1f}"   if r["unc"]  is not None else "    ?"
+        theo_s    = f"{r['theo']:8.1f}"  if r["theo"] is not None else "       ?"
+        res_s     = f"{r['res']:+6.1f}"  if r["res"]  is not None else "     ?"
+        rect_s    = f"{r['rect']:12.1f}" if r["rect"] is not None else "           ?"
+        cha_s     = f"{r['cha']:>5}"
+
+        if has_arrival_info:
+            lcres_s = (f"{r['locsat_bazres']:+6.1f}"
+                       if r.get("locsat_bazres") is not None else "     ?")
+            if r.get("baz_used") is True:
+                used_s = " YES"
+            elif r.get("baz_used") is False:
+                used_s = "  no"
+            else:
+                used_s = "   -"
+            print(f"{sta_label:<14} {cha_s}  {dist_s}  {obs_s}  {unc_s}  "
+                  f"{theo_s}  {res_s}  {lcres_s}  {used_s}  {rect_s}  {r['status']}")
         else:
-            used_s = "   -"
-        print(f"{sta_label:<12} {dist_s}  {obs_s}  {unc_s}  "
-              f"{theo_s}  {res_s}  {lcres_s}  {used_s}  {rect_s}  {r['status']}")
+            # Picks-only mode: show author instead of locator columns
+            auth_s = r["author"][:20] if r["author"] else "-"
+            print(f"{sta_label:<14} {cha_s}  {dist_s}  {obs_s}  {unc_s}  "
+                  f"{theo_s}  {res_s}  {rect_s}  {auth_s:<20}  {r['status']}")
 
     _print_summary(rows, min_dist, threshold, mode="xml")
 
@@ -563,6 +659,18 @@ def main():
         help="Partial origin ID to use instead of preferred origin  (XML mode only)",
     )
     parser.add_argument(
+        "--lat", type=float, default=None, metavar="DEG",
+        help="Epicentre latitude  (required for picks-only XML; overrides origin if given)",
+    )
+    parser.add_argument(
+        "--lon", type=float, default=None, metavar="DEG",
+        help="Epicentre longitude (required for picks-only XML; overrides origin if given)",
+    )
+    parser.add_argument(
+        "--depth", type=float, default=None, metavar="KM",
+        help="Epicentre depth in km  (optional, informational only)",
+    )
+    parser.add_argument(
         "--min-dist", type=float, default=20.0, metavar="DEG",
         help="Stations closer than this (°) are NEAR / excluded from RMS  [default: 20]",
     )
@@ -585,7 +693,8 @@ def main():
         print(f"Min reliable distance: {args.min_dist}°  "
               f"BAD threshold: ±{args.threshold}°", file=sys.stderr)
         process_xml(args.input_file, args.stations, args.origin_id,
-                    args.min_dist, args.threshold)
+                    args.min_dist, args.threshold,
+                    cli_lat=args.lat, cli_lon=args.lon, cli_depth=args.depth)
 
 
 if __name__ == "__main__":
