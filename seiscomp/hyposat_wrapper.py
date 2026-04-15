@@ -62,11 +62,6 @@ HYPOSAT_STATION_FILE = os.environ.get(
 
 HYPOSAT_MODEL = os.environ.get('HYPOSAT_MODEL', 'ak135_A')
 
-HYPOMOD_BIN = os.environ.get(
-    'HYPOMOD_BIN',
-    os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                 'bin', 'hypomod')
-)
 
 # ---------------------------------------------------------------------------
 # SeisComP XML helpers
@@ -314,77 +309,39 @@ def format_hyposat_parameter(init_lat, init_lon, init_depth,
     )
 
 # ---------------------------------------------------------------------------
-# HYPOMOD parameter file
+# Residual log  (parsed directly from hyposat-out)
 # ---------------------------------------------------------------------------
 
-def format_hypomod_parameter(loc, station_file, model):
-    """Build a hyposat-parameter file for HYPOMOD.
+def _append_residual_log(hyposat_out: str, loc: dict, log_path: str,
+                         model: str) -> None:
+    """Extract the residual table from hyposat-out and append to log_path."""
+    lines = hyposat_out.splitlines(keepends=True)
+    # Find the header line that starts the residual table
+    start = None
+    for i, line in enumerate(lines):
+        if 'Stat' in line and 'Delta' in line and 'Phase' in line:
+            start = i
+            break
+    if start is None:
+        print('WARNING: residual table not found in hyposat-out', file=sys.stderr)
+        return
 
-    HYPOMOD uses the same parameter file as HYPOSAT but with the final
-    solution pinned as the starting point (no inversion — it just evaluates
-    residuals).  The source time is passed as an ISO-like epochal string;
-    HYPOMOD accepts the human-readable form YYYY-MM-DD:HH.MM.SS.sss.
-    """
-    # Convert ISO time string to HYPOSAT human format: YYYY-MM-DD:HH.MM.SS.sss
-    # loc['time_iso'] is like "2026-04-05T09:40:08.374Z"
-    t = loc['time_iso'].rstrip('Z').replace('T', ' ')
-    # YYYY-MM-DD HH:MM:SS.sss  →  YYYY-MM-DD:HH.MM.SS.sss
-    date_part, time_part = t.split(' ')
-    time_part = time_part.replace(':', '.')
-    hypomod_time = f'{date_part}:{time_part}'
+    residual_section = ''.join(lines[start:])
 
-    return (
-        f'GLOBAL MODEL                       : {model}\n'
-        f'\n'
-        f'CRUST 1.0                          : 4\n'
-        f'OUTPUT OF REGIONAL MODEL           : 1\n'
-        f'\n'
-        f'STATION FILE                       : {station_file}\n'
-        f'\n'
-        f'P-VELOCITY TO CORRECT ELEVATION    : 4.5\n'
-        f'S-VELOCITY TO CORRECT ELEVATION    : 0.\n'
-        f'\n'
-        f'LG GROUP-VELOCITY                  : 3.5752\n'
-        f'RG GROUP-VELOCITY                  : 2.5\n'
-        f'LQ GROUP-VELOCITY                  : 4.4\n'
-        f'LR GROUP-VELOCITY                  : 2.85\n'
-        f'\n'
-        f'STARTING SOURCE LATITUDE           : {loc["lat"]:.4f}\n'
-        f'STARTING LATITUDE UNCERTAINTY      : 0.\n'
-        f'\n'
-        f'STARTING SOURCE LONGITUDE          : {loc["lon"]:.4f}\n'
-        f'STARTING LONGITUDE UNCERTAINTY     : 0.\n'
-        f'\n'
-        f'STARTING SOURCE DEPTH              : {loc["depth"]:.3f}\n'
-        f'STARTING DEPTH UNCERTAINTY         : 0.\n'
-        f'DEPTH FLAG                         : f\n'
-        f'\n'
-        f'STARTING SOURCE TIME               : {hypomod_time}\n'
-        f'STARTING TIME UNCERTAINTY          : 0.\n'
-        f'\n'
-        f'MAXIMUM # OF ITERATIONS            : 0\n'
-        f'\n'
-        f'SLOWNESS [S/DEG]                   : 1\n'
-        f'\n'
-        f'MAXIMUM BAZ RESIDUAL               : 180.\n'
-        f'MAXIMUM SLOWNESS RESIDUAL          : 999.\n'
-        f'\n'
-        f'FLAG USING TRAVEL-TIME DIFFERENCES : 1\n'
-        f'\n'
-        f'FLAG FREE PHASE SEARCH             : 1\n'
-        f'\n'
-        f'TT DATA UNCERTAINTY OUT            : 1\n'
-        f'ISF_i                              : 0.05\n'
-        f'ISF_o                              : 0.5\n'
-        f'\n'
-        f'MAGNITUDE CALCULATION              : 0\n'
-        f'\n'
-        f'INPUT FILE NAME                    : _\n'
-        f'\n'
-        f'OUTPUT SWITCH                      : 1\n'
-        f'OUTPUT FILE NAME                   : _\n'
-        f'OUTPUT LEVEL                       : 4\n'
-    )
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(log_path)), exist_ok=True)
+        with open(log_path, 'a') as f:
+            f.write(f'\n{"="*72}\n')
+            f.write(f'Event: {loc["time_iso"]}  '
+                    f'lat={loc["lat"]:.4f}  lon={loc["lon"]:.4f}  '
+                    f'z={loc["depth"]:.1f} km  '
+                    f'rms={loc["rms"]:.3f} s  '
+                    f'model={model}\n')
+            f.write(f'{"="*72}\n')
+            f.write(residual_section)
+        print(f'INFO: residuals appended to {log_path}', file=sys.stderr)
+    except OSError as e:
+        print(f'WARNING: could not write residual log: {e}', file=sys.stderr)
 
 
 # ---------------------------------------------------------------------------
@@ -651,9 +608,9 @@ def main():
                         help='Ignore arrivals beyond this distance [deg]')
     parser.add_argument('--ignore-initial-location', action='store_true',
                         help='Let Hyposat compute the starting location')
-    parser.add_argument('--hypomod-log', metavar='PATH', default=None,
-                        help='Run HYPOMOD after location and append residuals '
-                             'to this log file')
+    parser.add_argument('--residual-log', metavar='PATH', default=None,
+                        help='Append hyposat-out residual table to this log '
+                             'file after each relocation')
     args = parser.parse_args()
 
     # --- Read XML from stdin ---
@@ -754,61 +711,10 @@ def main():
               f'z={loc["depth"]:.1f} km  rms={loc["rms"]:.3f} s  '
               f'def={loc["def_count"]}', file=sys.stderr)
 
-        # --- Optionally run HYPOMOD ---
-        if args.hypomod_log and os.path.isfile(HYPOMOD_BIN):
-            hypomod_param_text = format_hypomod_parameter(
-                loc,
-                station_file=HYPOSAT_STATION_FILE,
-                model=HYPOSAT_MODEL,
-            )
-            hypomod_param_file = os.path.join(tmpdir, 'hyposat-parameter')
-            hypomod_out_file   = os.path.join(tmpdir, 'hypomod-out')
-
-            # HYPOMOD reads from 'hypomod-in' (not 'hyposat-in')
-            shutil.copy(in_file, os.path.join(tmpdir, 'hypomod-in'))
-
-            # Overwrite the parameter file with the HYPOMOD version
-            with open(hypomod_param_file, 'w') as f:
-                f.write(hypomod_param_text)
-
-            print(f'INFO: running hypomod for residual log', file=sys.stderr)
-            hm_result = subprocess.run(
-                [HYPOMOD_BIN],
-                cwd=tmpdir,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                capture_output=True,
-                text=True,
-                timeout=30,
-            )
-
-            if hm_result.returncode == 0 and os.path.exists(hypomod_out_file):
-                with open(hypomod_out_file, 'r') as f:
-                    hypomod_out = f.read()
-
-                # Append to the log file with an event header
-                try:
-                    os.makedirs(os.path.dirname(os.path.abspath(args.hypomod_log)),
-                                exist_ok=True)
-                    with open(args.hypomod_log, 'a') as f:
-                        f.write(f'\n{"="*72}\n')
-                        f.write(f'Event: {loc["time_iso"]}  '
-                                f'lat={loc["lat"]:.4f}  lon={loc["lon"]:.4f}  '
-                                f'z={loc["depth"]:.1f} km  '
-                                f'rms={loc["rms"]:.3f} s  '
-                                f'model={HYPOSAT_MODEL}\n')
-                        f.write(f'{"="*72}\n')
-                        f.write(hypomod_out)
-                    print(f'INFO: hypomod residuals appended to {args.hypomod_log}',
-                          file=sys.stderr)
-                except OSError as e:
-                    print(f'WARNING: could not write hypomod log: {e}',
-                          file=sys.stderr)
-            else:
-                print(f'WARNING: hypomod failed (exit {hm_result.returncode})',
-                      file=sys.stderr)
-                if hm_result.stdout:
-                    print(hm_result.stdout[:500], file=sys.stderr)
+        # --- Optionally log residuals from hyposat-out ---
+        if args.residual_log:
+            _append_residual_log(hyposat_out, loc, args.residual_log,
+                                 HYPOSAT_MODEL)
 
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
