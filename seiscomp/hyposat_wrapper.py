@@ -20,6 +20,8 @@ Environment variables (override the defaults below):
     HYPOSAT_DATA_DIR      Directory containing velocity models + stations.dat
     HYPOSAT_STATION_FILE  Path to Hyposat stations.dat  (default: DATA_DIR/stations.dat)
     HYPOSAT_MODEL         Velocity model name            (default: ak135_A)
+    HYPOSAT_COR_FILE      Path to stations.cor correction file (default: DATA_DIR/stations.cor)
+                          Set to empty string to disable station corrections.
 
 IMPORTANT - Station coordinates:
     Hyposat reads station coordinates from its own stations.dat file.
@@ -61,6 +63,11 @@ HYPOSAT_STATION_FILE = os.environ.get(
 )
 
 HYPOSAT_MODEL = os.environ.get('HYPOSAT_MODEL', 'ak135_A')
+
+HYPOSAT_COR_FILE = os.environ.get(
+    'HYPOSAT_COR_FILE',
+    os.path.join(HYPOSAT_DATA_DIR, 'stations.cor')
+)
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +238,8 @@ def format_hyposat_in(origin_el, picks_dict, ns_uri,
 
 def format_hyposat_parameter(init_lat, init_lon, init_depth,
                               station_file, data_dir, model,
-                              fixed_depth=None, ignore_init_loc=False):
+                              fixed_depth=None, ignore_init_loc=False,
+                              station_cor=None):
     """Build hyposat-parameter file content."""
 
     if ignore_init_loc or init_lat is None or init_lon is None:
@@ -255,7 +263,8 @@ def format_hyposat_parameter(init_lat, init_lon, init_depth,
         f'OUTPUT OF REGIONAL MODEL           : 1\n'
         f'\n'
         f'STATION FILE                       : {station_file}\n'
-        f'\n'
+        + (f'STATION CORRECTION FILE            : {station_cor}\n' if station_cor else '')
+        + f'\n'
         f'P-VELOCITY TO CORRECT ELEVATION    : 4.5\n'
         f'S-VELOCITY TO CORRECT ELEVATION    : 0.\n'
         f'\n'
@@ -728,6 +737,10 @@ def main():
     parser.add_argument('--residual-log', metavar='PATH', default=None,
                         help='Append hyposat-out residual table to this log '
                              'file after each relocation')
+    parser.add_argument('--station-cor', metavar='PATH', default=None,
+                        help='Station correction file (HYPOSAT stations.cor format). '
+                             'Overrides HYPOSAT_COR_FILE env var. '
+                             'Pass empty string to disable corrections.')
     args = parser.parse_args()
 
     # --- Read XML from stdin ---
@@ -762,13 +775,25 @@ def main():
         max_dist=args.max_dist,
         ignore_init_loc=args.ignore_initial_location
     )
+    # Resolve station correction file: CLI > env var > default path (skip if missing)
+    if args.station_cor is not None:
+        cor_file = args.station_cor or None   # empty string → disable
+    else:
+        cor_file = HYPOSAT_COR_FILE if os.path.isfile(HYPOSAT_COR_FILE) else None
+    if cor_file:
+        print(f'INFO: using station corrections: {cor_file}', file=sys.stderr)
+    else:
+        print('INFO: no station correction file found — running without corrections',
+              file=sys.stderr)
+
     hyposat_param_text = format_hyposat_parameter(
         init_lat, init_lon, init_depth,
         station_file=HYPOSAT_STATION_FILE,
         data_dir=HYPOSAT_DATA_DIR,
         model=HYPOSAT_MODEL,
         fixed_depth=args.fixed_depth,
-        ignore_init_loc=args.ignore_initial_location
+        ignore_init_loc=args.ignore_initial_location,
+        station_cor=cor_file
     )
 
     # --- Run Hyposat in a temporary directory ---
