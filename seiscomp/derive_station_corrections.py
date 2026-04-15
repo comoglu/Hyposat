@@ -446,21 +446,30 @@ def main():
               f"({len(all_stas)} stations)", file=sys.stderr)
 
     # -------------------------------------------------------------------
-    # LOCSAT / SeisComP corrections
+    # LOCSAT / SeisComP corrections  (.stacor format)
+    #
+    # SeisComP LOCSAT subtracts the delay from the observed travel time:
+    #   t_obs - delay = t_predicted
+    # So delay = mean(residuals) = -correction.
+    # Format: LOCDELAY NET.STA PHASE N_READINGS DELAY_S
+    # File goes in $SEISCOMP_ROOT/share/locsat/tables/<profile>.stacor
     # -------------------------------------------------------------------
     if args.locsat_cor:
         lines = [
             "# SeisComP/LOCSAT station corrections derived by "
             "derive_station_corrections.py",
             f"# Events used: {n_events_used}",
-            f"# Format: NET STA PHASE correction_s",
+            "# Format: LOCDELAY NET.STA PHASE N_READINGS DELAY_S",
+            "# Place this file at $SEISCOMP_ROOT/share/locsat/tables/<profile>.stacor",
             "#",
         ]
         for (net, sta, phase), c in sorted(corrections.items()):
             if not c["stable"]:
                 continue
+            # delay = mean residual = -correction (LOCSAT subtracts this value)
+            delay = c["mean"]
             lines.append(
-                f"{net:<6} {sta:<8} {phase:<6} {c['correction']:+.3f}"
+                f"LOCDELAY {net}.{sta} {phase} {c['n_clipped']} {delay:+.3f}"
             )
 
         with open(args.locsat_cor, "w") as f:
