@@ -14,20 +14,20 @@ systematic bias.
 
 Usage
 -----
-  # Single file
-  python3 derive_station_corrections.py event1.xml event2.xml ...
-
-  # Glob
-  python3 derive_station_corrections.py /data/xml/*.xml
-
-  # Write output files
-  python3 derive_station_corrections.py /data/xml/*.xml \\
+  # Pass a directory (recommended for 1000+ files — avoids shell ARG_MAX)
+  python3 derive_station_corrections.py --dir /data/xml/ \\
       --hyposat-cor stations.cor \\
       --locsat-cor  locsat_corrections.dat \\
       --report      corrections_report.txt
 
+  # Or pass files explicitly
+  python3 derive_station_corrections.py event1.xml event2.xml ...
+
+  # Glob (watch out for ARG_MAX with thousands of files)
+  python3 derive_station_corrections.py /data/xml/*.xml
+
   # Tighten quality filters
-  python3 derive_station_corrections.py /data/xml/*.xml \\
+  python3 derive_station_corrections.py --dir /data/xml/ \\
       --max-rms 0.8 --max-gap 150 --min-phases 10 --min-events 30
 
 Output files
@@ -50,6 +50,7 @@ Notes
 """
 
 import argparse
+import glob
 import math
 import os
 import sys
@@ -66,17 +67,6 @@ _KNOWN_NS = [
     "http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.13",
     "http://geofon.gfz.de/ns/seiscomp-schema/0.14",
 ]
-
-
-def _detect_ns(path: str) -> str:
-    try:
-        tree = ET.parse(path)
-        tag = tree.getroot().tag
-        if tag.startswith("{"):
-            return tag[1:tag.index("}")]
-    except Exception:
-        pass
-    return _KNOWN_NS[-1]
 
 
 def q(ns: str, tag: str) -> str:
@@ -104,12 +94,21 @@ def _float(el, ns: str, *tags):
 # Per-event extraction
 # ---------------------------------------------------------------------------
 
-def extract_event(path: str, ns: str,
+def _detect_ns(root) -> str:
+    """Detect SeisComP namespace from the already-parsed root element."""
+    tag = root.tag
+    if tag.startswith("{"):
+        return tag[1:tag.index("}")]
+    return _KNOWN_NS[-1]
+
+
+def extract_event(path: str,
                   max_rms: float, max_gap: float, min_phases: int,
                   phases_wanted: set) -> list[dict]:
     """Return a list of {net, sta, phase, residual} dicts for one XML file.
 
     Returns [] if the preferred origin fails the quality filters.
+    Detects namespace from the root element (single parse, no double-read).
     """
     try:
         tree = ET.parse(path)
@@ -119,6 +118,7 @@ def extract_event(path: str, ns: str,
         return []
 
     root = tree.getroot()
+    ns = _detect_ns(root)
     ep = root.find(q(ns, "EventParameters"))
     if ep is None:
         return []
@@ -250,8 +250,11 @@ def main():
             "<timeResidual> elements — no travel-time recomputation needed."
         )
     )
-    parser.add_argument("xml_files", nargs="+", metavar="FILE",
+    parser.add_argument("xml_files", nargs="*", metavar="FILE",
                         help="SeisComP XML files (preferred-origin exports)")
+    parser.add_argument("--dir", metavar="DIR", default=None,
+                        help="Directory of *.xml files — use instead of listing "
+                             "thousands of paths on the command line")
     parser.add_argument("--hyposat-cor", metavar="PATH", default=None,
                         help="Write HYPOSAT stations.cor to this file")
     parser.add_argument("--locsat-cor", metavar="PATH", default=None,
@@ -286,6 +289,13 @@ def main():
                         help="Disable sigma-clipping of outlier residuals")
     args = parser.parse_args()
 
+    # Build file list from positional args and/or --dir
+    xml_files = list(args.xml_files)
+    if args.dir:
+        xml_files += sorted(glob.glob(os.path.join(args.dir, "*.xml")))
+    if not xml_files:
+        sys.exit("ERROR: no XML files specified — use positional arguments or --dir")
+
     phases_wanted = {p.strip().upper() for p in args.phases.split(",")}
 
     # -------------------------------------------------------------------
@@ -295,13 +305,16 @@ def main():
     residuals: dict[tuple, list[float]] = defaultdict(list)
     n_events_used = 0
     n_events_skipped = 0
+    n_total = len(xml_files)
 
-    for path in args.xml_files:
+    for i, path in enumerate(xml_files, 1):
+        if i % 100 == 0 or i == n_total:
+            print(f"  [{i}/{n_total}] used={n_events_used} skipped={n_events_skipped}",
+                  file=sys.stderr)
         if not os.path.isfile(path):
             print(f"WARNING: not found: {path}", file=sys.stderr)
             continue
-        ns = _detect_ns(path)
-        rows = extract_event(path, ns,
+        rows = extract_event(path,
                              max_rms=args.max_rms,
                              max_gap=args.max_gap,
                              min_phases=args.min_phases,
