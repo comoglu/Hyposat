@@ -259,8 +259,8 @@ def format_hyposat_parameter(init_lat, init_lon, init_depth,
     return (
         f'GLOBAL MODEL                       : {model}\n'
         f'\n'
-        f'CRUST 1.0                          : 4\n'
-        f'OUTPUT OF REGIONAL MODEL           : 1\n'
+        f'CRUST 1.0                          : 0\n'
+        f'OUTPUT OF REGIONAL MODEL           : 0\n'
         f'\n'
         f'STATION FILE                       : {station_file}\n'
         + (f'STATION CORRECTION FILE            : {station_cor}\n' if station_cor else '')
