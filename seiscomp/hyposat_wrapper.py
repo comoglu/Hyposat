@@ -464,6 +464,89 @@ def parse_hyposat_out(text):
     return result
 
 # ---------------------------------------------------------------------------
+# Parse residual table from hyposat-out
+# ---------------------------------------------------------------------------
+
+def parse_hyposat_residuals(text: str) -> dict:
+    """Parse the per-station residual table from hyposat-out.
+
+    Returns {(STATION_UPPER, PHASE_UPPER): {dist, time_res, baz_obs,
+                                             baz_res, slow_obs, slow_res}}
+
+    The table starts at the header line containing 'Stat', 'Delta', 'Phase'
+    and ends before the azimuthal-gap / RMS summary section.
+    """
+    result = {}
+    in_table = False
+
+    for line in text.splitlines():
+        if 'Stat' in line and 'Delta' in line and 'Phase' in line:
+            in_table = True
+            continue
+        if not in_table:
+            continue
+        stripped = line.strip()
+        if not stripped:
+            continue
+        # End of table at the summary statistics section
+        if stripped.startswith(('Maximum', 'Residuals', 'Weighted', 'T0 ')):
+            break
+        # Station lines start in the first column (no leading space)
+        if line[0] == ' ':
+            continue
+
+        tokens = line.split()
+        if len(tokens) < 8:
+            continue
+
+        try:
+            station = tokens[0][:5].upper()
+            delta   = float(tokens[1])
+            # tokens[2] = azimuth
+            phase   = tokens[3].upper()
+        except (ValueError, IndexError):
+            continue
+
+        # tokens[4] may be the [used/associated] phase (alphabetic) or HH
+        idx = 4
+        try:
+            int(tokens[idx])      # succeeds → it's HH, no [used] phase
+        except (ValueError, IndexError):
+            idx += 1              # skip [used] phase token
+
+        try:
+            # HH MM SS.sss time_res
+            _hh       = int(tokens[idx])      # noqa: F841
+            _mm       = int(tokens[idx + 1])  # noqa: F841
+            _ss       = float(tokens[idx + 2])# noqa: F841
+            time_res  = float(tokens[idx + 3])
+        except (ValueError, IndexError):
+            continue
+
+        idx += 4
+
+        # Collect trailing numeric values: baz_obs, baz_res, slow_obs, slow_res
+        # Stop at the first non-numeric token (the Used flags column)
+        nums = []
+        for tok in tokens[idx:]:
+            try:
+                nums.append(float(tok))
+            except ValueError:
+                break
+
+        result[(station, phase)] = {
+            'dist':     delta,
+            'time_res': time_res,
+            'baz_obs':  nums[0] if len(nums) > 0 else None,
+            'baz_res':  nums[1] if len(nums) > 1 else None,
+            'slow_obs': nums[2] if len(nums) > 2 else None,
+            'slow_res': nums[3] if len(nums) > 3 else None,
+        }
+
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Build output SeisComP XML
 # ---------------------------------------------------------------------------
 
@@ -477,7 +560,15 @@ def _copy_element(src, ns_uri, dest_parent):
     return el
 
 
-def build_output_xml(origin_el, picks_dict, loc, ns_uri):
+def _set_or_create(parent, ns_uri, tag, value: str):
+    """Set the text of a direct child element, creating it if absent."""
+    el = parent.find(q(ns_uri, tag))
+    if el is None:
+        el = ET.SubElement(parent, q(ns_uri, tag))
+    el.text = value
+
+
+def build_output_xml(origin_el, picks_dict, loc, ns_uri, residuals=None):
     """
     Construct an EventParameters XML document with the Hyposat-derived origin.
     """
@@ -579,12 +670,38 @@ def build_output_xml(origin_el, picks_dict, loc, ns_uri):
                           q(ns_uri, 'azimuthMaxHorizontalUncertainty')).text = \
                 f"{loc['ellipse_azimuth']:.1f}"
 
-    # --- Arrivals (copy non-zero-weight arrivals from input) ---
+    # --- Arrivals (copy non-zero-weight arrivals, update residuals) ---
+    n_updated = 0
     for arr_el in origin_el.findall(q(ns_uri, 'arrival')):
         w = get_float(arr_el, ns_uri, 'weight')
         if w is not None and w == 0.0:
             continue
-        _copy_element(arr_el, ns_uri, orig_el)
+        copied = _copy_element(arr_el, ns_uri, orig_el)
+
+        if residuals:
+            pick_id = get_text(arr_el, ns_uri, 'pickID')
+            pick_el = picks_dict.get(pick_id)
+            if pick_el is not None:
+                wf = pick_el.find(q(ns_uri, 'waveformID'))
+                if wf is not None:
+                    sta   = wf.get('stationCode', '')[:5].upper()
+                    phase = (get_text(arr_el, ns_uri, 'phase') or 'P').upper()
+                    res   = residuals.get((sta, phase))
+                    if res is not None:
+                        _set_or_create(copied, ns_uri, 'timeResidual',
+                                       f"{res['time_res']:.3f}")
+                        if res['baz_res'] is not None:
+                            _set_or_create(copied, ns_uri, 'backazimuthResidual',
+                                           f"{res['baz_res']:.2f}")
+                        if res['slow_res'] is not None:
+                            _set_or_create(copied, ns_uri,
+                                           'horizontalSlownessResidual',
+                                           f"{res['slow_res']:.3f}")
+                        n_updated += 1
+
+    if residuals is not None:
+        print(f'INFO: updated residuals for {n_updated} arrivals from hyposat-out',
+              file=sys.stderr)
 
     # Pretty-print if Python >= 3.9
     if sys.version_info >= (3, 9):
@@ -655,7 +772,8 @@ def main():
     )
 
     # --- Run Hyposat in a temporary directory ---
-    loc = None
+    loc       = None
+    residuals = {}
     tmpdir = tempfile.mkdtemp(prefix='hyposat_sc_')
     try:
         in_file    = os.path.join(tmpdir, 'hyposat-in')
@@ -711,6 +829,10 @@ def main():
               f'z={loc["depth"]:.1f} km  rms={loc["rms"]:.3f} s  '
               f'def={loc["def_count"]}', file=sys.stderr)
 
+        residuals = parse_hyposat_residuals(hyposat_out)
+        print(f'INFO: parsed {len(residuals)} residuals from hyposat-out',
+              file=sys.stderr)
+
         # --- Optionally log residuals from hyposat-out ---
         if args.residual_log:
             _append_residual_log(hyposat_out, loc, args.residual_log,
@@ -724,7 +846,8 @@ def main():
         sys.exit(1)
 
     # --- Build and emit output XML ---
-    out_xml = build_output_xml(origin_el, picks_dict, loc, ns_uri)
+    out_xml = build_output_xml(origin_el, picks_dict, loc, ns_uri,
+                               residuals=residuals)
     sys.stdout.write(out_xml)
     sys.stdout.flush()
 
