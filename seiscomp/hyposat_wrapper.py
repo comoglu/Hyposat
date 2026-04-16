@@ -858,6 +858,14 @@ def main():
         print(f'INFO: parsed {len(residuals)} residuals from hyposat-out',
               file=sys.stderr)
 
+        # --- Print residual table from hyposat-out to stderr ---
+        in_table = False
+        for line in hyposat_out.splitlines():
+            if 'Stat' in line and 'Delta' in line and 'Phase' in line:
+                in_table = True
+            if in_table:
+                print(f'HYPOSAT: {line}', file=sys.stderr)
+
         # --- Optionally log residuals from hyposat-out ---
         if args.residual_log:
             _append_residual_log(hyposat_out, loc, args.residual_log,
