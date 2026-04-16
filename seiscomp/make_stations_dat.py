@@ -23,22 +23,20 @@ or merged with the NORSAR-provided stations.dat that comes with Hyposat.
 
 import sys
 import xml.etree.ElementTree as ET
-import re
 import argparse
 
 
-# SeisComP inventory namespace (try both common versions)
-SC_NS_CANDIDATES = [
-    'http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.11',
-    'http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.10',
-    'http://geofon.gfz-potsdam.de/ns/seiscomp3-schema/0.9',
-    '',
-]
-
-
 def detect_namespace(root):
-    m = re.match(r'\{(.+?)\}', root.tag)
-    return m.group(1) if m else ''
+    """Extract namespace URI from the root element tag.
+
+    Works with any SeisComP schema version (0.9 through 0.14 and beyond)
+    by reading the namespace directly from the parsed XML rather than
+    matching against a hardcoded list.
+    """
+    tag = root.tag
+    if tag.startswith('{'):
+        return tag[1:tag.index('}')]
+    return ''
 
 
 def q(ns, tag):
