@@ -308,6 +308,11 @@ def format_hyposat_parameter(init_lat, init_lon, init_depth,
         f'\n'
         f'MAGNITUDE CALCULATION              : 0\n'
         f'\n'
+        # SeisComP's Origin/Arrival distance fields are always in degrees;
+        # pin this explicitly so the Delta/Azi columns parse_hyposat_residuals()
+        # reads from hyposat-out are never accidentally in km.
+        f'OUTPUT IN KM                       : 0\n'
+        f'\n'
         f'INPUT FILE NAME                    : _\n'
         f'\n'
         f'FLAG EMERGENCE ANGLE OUTPUT        : 0\n'
@@ -479,21 +484,32 @@ def parse_hyposat_out(text):
 def parse_hyposat_residuals(text: str) -> dict:
     """Parse the per-station residual table from hyposat-out.
 
-    Returns {(STATION_UPPER, PHASE_UPPER): {dist, time_res, baz_obs,
+    Returns {(STATION_UPPER, PHASE_UPPER): {dist, azi, time_res, baz_obs,
                                              baz_res, slow_obs, slow_res}}
 
-    The table starts at the header line containing 'Stat', 'Delta', 'Phase'
-    and ends before the azimuthal-gap / RMS summary section.
-    """
-    result = {}
-    in_table = False
+    dist/azi are Hyposat's own station-to-solution distance [deg] and azimuth
+    [deg] for the *relocated* origin (see 'OUTPUT IN KM' in hyposat-parameter,
+    always left at 0/degrees by this wrapper) — distinct from, and normally
+    more current than, the distance/azimuth on the SeisComP arrival that was
+    computed for the pre-relocation origin.
 
-    for line in text.splitlines():
+    Hyposat prints this table once per relocation iteration, each followed by
+    its own azimuthal-gap/RMS summary block. We take the table after the
+    LAST header occurrence, matching parse_hyposat_out()'s use of the last
+    T0/LAT/LON summary line — otherwise residuals/distance/azimuth here would
+    describe an earlier, non-final iteration instead of the reported solution.
+    """
+    lines = text.splitlines()
+
+    header_idx = None
+    for i, line in enumerate(lines):
         if 'Stat' in line and 'Delta' in line and 'Phase' in line:
-            in_table = True
-            continue
-        if not in_table:
-            continue
+            header_idx = i
+    if header_idx is None:
+        return {}
+
+    result = {}
+    for line in lines[header_idx + 1:]:
         stripped = line.strip()
         if not stripped:
             continue
@@ -511,7 +527,7 @@ def parse_hyposat_residuals(text: str) -> dict:
         try:
             station = tokens[0][:5].upper()
             delta   = float(tokens[1])
-            # tokens[2] = azimuth
+            azi     = float(tokens[2])
             phase   = tokens[3].upper()
         except (ValueError, IndexError):
             continue
@@ -545,6 +561,7 @@ def parse_hyposat_residuals(text: str) -> dict:
 
         result[(station, phase)] = {
             'dist':     delta,
+            'azi':      azi,
             'time_res': time_res,
             'baz_obs':  nums[0] if len(nums) > 0 else None,
             'baz_res':  nums[1] if len(nums) > 1 else None,
@@ -622,16 +639,43 @@ def build_output_xml(origin_el, picks_dict, loc, ns_uri, residuals=None):
     ET.SubElement(orig_el, q(ns_uri, 'earthModelID')).text = HYPOSAT_MODEL
 
     # --- Quality (compute stats from arrivals that will be written) ---
+    all_arrivals = origin_el.findall(q(ns_uri, 'arrival'))
     used_arrivals = [
-        arr_el for arr_el in origin_el.findall(q(ns_uri, 'arrival'))
+        arr_el for arr_el in all_arrivals
         if not ((get_float(arr_el, ns_uri, 'weight') or 1.0) == 0.0)
     ]
-    all_arrivals = origin_el.findall(q(ns_uri, 'arrival'))
 
-    # Azimuthal gap from azimuth values on used arrivals
+    def _relocated_geom(arr_el):
+        """Distance/azimuth [deg] for the *new* Hyposat solution (from the
+        Delta/Azi columns of hyposat-out's residual table), falling back to
+        the pre-relocation arrival values if this station/phase has no entry
+        there. The original arrival's distance/azimuth describe the seed
+        origin, not the relocated one, so they go stale once Hyposat moves
+        the epicenter."""
+        dist = azi = None
+        if residuals:
+            pick_id = get_text(arr_el, ns_uri, 'pickID')
+            pick_el = picks_dict.get(pick_id)
+            if pick_el is not None:
+                wf = pick_el.find(q(ns_uri, 'waveformID'))
+                if wf is not None:
+                    sta   = wf.get('stationCode', '')[:5].upper()
+                    phase = (get_text(arr_el, ns_uri, 'phase') or 'P').upper()
+                    res   = residuals.get((sta, phase))
+                    if res is not None:
+                        dist, azi = res['dist'], res['azi']
+        if dist is None:
+            dist = get_float(arr_el, ns_uri, 'distance')
+        if azi is None:
+            azi = get_float(arr_el, ns_uri, 'azimuth')
+        return dist, azi
+
+    geom_by_arr = {a: _relocated_geom(a) for a in all_arrivals}
+
+    # Azimuthal gap from the relocated azimuths of used arrivals
     azimuths: list[float] = sorted(
         v for a in used_arrivals
-        if (v := get_float(a, ns_uri, 'azimuth')) is not None
+        if (v := geom_by_arr[a][1]) is not None
     )
     if len(azimuths) >= 2:
         gaps = [azimuths[i+1] - azimuths[i] for i in range(len(azimuths)-1)]
@@ -640,20 +684,11 @@ def build_output_xml(origin_el, picks_dict, loc, ns_uri, residuals=None):
     else:
         az_gap = None
 
-    # Distance stats from used arrivals
+    # Distance stats from the relocated distances of used arrivals
     distances: list[float] = sorted(
         v for a in used_arrivals
-        if (v := get_float(a, ns_uri, 'distance')) is not None
+        if (v := geom_by_arr[a][0]) is not None
     )
-
-    # Unique station codes used
-    used_sta = set()
-    for a in used_arrivals:
-        pid = get_text(a, ns_uri, 'pickID')
-        # station code encoded in arrival azimuth/distance — use pick lookup below
-        # (we count arrivals as a proxy; exact dedup done via pick waveformID)
-        if pid:
-            used_sta.add(pid)
 
     qual_el = ET.SubElement(orig_el, q(ns_uri, 'quality'))
     ET.SubElement(qual_el, q(ns_uri, 'associatedPhaseCount')).text = str(len(all_arrivals))
@@ -679,13 +714,20 @@ def build_output_xml(origin_el, picks_dict, loc, ns_uri, residuals=None):
                           q(ns_uri, 'azimuthMaxHorizontalUncertainty')).text = \
                 f"{loc['ellipse_azimuth']:.1f}"
 
-    # --- Arrivals (copy non-zero-weight arrivals, update residuals) ---
+    # --- Arrivals (copy non-zero-weight arrivals, refresh distance/azimuth
+    #     and residuals from Hyposat's relocated solution) ---
     n_updated = 0
-    for arr_el in origin_el.findall(q(ns_uri, 'arrival')):
+    for arr_el in all_arrivals:
         w = get_float(arr_el, ns_uri, 'weight')
         if w is not None and w == 0.0:
             continue
         copied = _copy_element(arr_el, ns_uri, orig_el)
+
+        dist, azi = geom_by_arr[arr_el]
+        if dist is not None:
+            _set_or_create(copied, ns_uri, 'distance', f"{dist:.4f}")
+        if azi is not None:
+            _set_or_create(copied, ns_uri, 'azimuth', f"{azi:.2f}")
 
         if residuals:
             pick_id = get_text(arr_el, ns_uri, 'pickID')
