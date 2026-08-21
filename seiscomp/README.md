@@ -82,8 +82,7 @@ python3 hyposat_wrapper.py < event.xml
 ### 5. Restart scolv
 
 ```bash
-seiscomp restart scolv
-# or just relaunch scolv
+just relaunch scolv
 ```
 
 HYPOSAT will now appear in the **Locator** drop-down in `scolv`.
